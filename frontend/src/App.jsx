@@ -18,7 +18,7 @@ const AuthIcon = () => (
 
 // --- API Configuration ---
 // IMPORTANT: Replace with your actual Render URL once deployed
-const RENDER_BACKEND_URL = 'https://your-backend-name.onrender.com'; 
+const RENDER_BACKEND_URL = 'https://pricelert.onrender.com'; 
 
 const API_URL = `${RENDER_BACKEND_URL}/api`;
 const SOCKET_URL = RENDER_BACKEND_URL;
