@@ -121,13 +121,12 @@ async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
     let browser = null;
     try {
-        // --- THIS IS THE KEY CHANGE FOR RENDER DEPLOYMENT ---
-        // Simple launch arguments work when using the buildpack
         browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            // THIS IS THE ONLY LINE YOU NEED TO ADD
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
         });
-        // --- END OF KEY CHANGE ---
 
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'networkidle2' });
