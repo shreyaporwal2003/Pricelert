@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer'); // Reverted to standard puppeteer
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
@@ -35,7 +34,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // --- Fail-fast check for essential environment variables ---
 if (!MONGO_URI || !JWT_SECRET) {
     console.error("FATAL ERROR: MONGO_URI and JWT_SECRET environment variables are required.");
-    process.exit(1); // Exit the process with an error code
+    process.exit(1);
 }
 
 // --- MongoDB Connection ---
@@ -122,13 +121,13 @@ async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
     let browser = null;
     try {
+        // --- THIS IS THE KEY CHANGE FOR RENDER DEPLOYMENT ---
+        // Simple launch arguments work when using the buildpack
         browser = await puppeteer.launch({
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath,
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
+        // --- END OF KEY CHANGE ---
 
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'networkidle2' });
@@ -213,7 +212,6 @@ app.post('/api/auth/register', async (req, res) => {
         await user.save();
         const payload = { user: { id: user.id } };
 
-        // --- IMPROVED JWT ERROR HANDLING ---
         jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
             if (err) {
                 console.error("JWT Sign Error:", err);
@@ -223,7 +221,7 @@ app.post('/api/auth/register', async (req, res) => {
         });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server error during registration' }); // Standardized error response
+        res.status(500).json({ msg: 'Server error during registration' });
     }
 });
 
@@ -240,7 +238,6 @@ app.post('/api/auth/login', async (req, res) => {
         }
         const payload = { user: { id: user.id } };
 
-        // --- IMPROVED JWT ERROR HANDLING ---
         jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
             if (err) {
                 console.error("JWT Sign Error:", err);
@@ -250,7 +247,7 @@ app.post('/api/auth/login', async (req, res) => {
         });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server error during login' }); // Standardized error response
+        res.status(500).json({ msg: 'Server error during login' });
     }
 });
 
