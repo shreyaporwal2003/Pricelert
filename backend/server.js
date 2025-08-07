@@ -124,7 +124,7 @@ async function scrapePrice(url) {
         browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            // THIS IS THE ONLY LINE YOU NEED TO ADD
+            // This is the line that fixes the error
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
         });
 
