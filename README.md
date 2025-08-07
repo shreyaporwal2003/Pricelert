@@ -28,6 +28,3 @@ PriceAlert is a full-stack web application that allows users to monitor the pric
 ***
 
 
-```bash
-git clone [https://github.com/your-username/your-repository-name.git](https://github.com/your-username/your-repository-name.git)
-cd your-repository-name
