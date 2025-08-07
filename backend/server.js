@@ -1,6 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const puppeteer = require('puppeteer'); // Reverted to standard puppeteer
+const puppeteer = require('puppeteer');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
@@ -121,11 +121,10 @@ async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
     let browser = null;
     try {
+        // Simplified launch for Docker environment
         browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            // This is the line that fixes the error
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
         const page = await browser.newPage();
