@@ -1,34 +1,63 @@
-# Use an official Node.js runtime
+# Use an official Node.js runtime as a parent image
 FROM node:18-slim
 
-# Set working directory
+# Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Install dependencies needed by @sparticuz/chromium
-# This is a smaller, more specific list than before
-RUN apt-get update && apt-get install -yq \
-    libgconf-2-4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libgdk-pixbuf2.0-0 \
-    libgtk-3-0 \
-    libgbm-dev \
-    libnss3 \
-    libxss1 \
-    --no-install-recommends
-
-# Copy package files
+# Copy package.json and package-lock.json
 COPY package.json ./
 COPY package-lock.json ./
 
-# Install project dependencies
+# Install app dependencies using a clean install
 RUN npm ci
 
-# Copy the rest of your app's source code
+# Puppeteer recommends installing these dependencies
+# See: https://pptr.dev/guides/docker
+RUN apt-get update && apt-get install -yq \
+    gconf-service \
+    libasound2 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgcc1 \
+    libgconf-2-4 \
+    libgdk-pixbuf2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator1 \
+    libnss3 \
+    lsb-release \
+    xdg-utils \
+    wget --no-install-recommends
+
+# Copy the rest of your application's source code
 COPY . .
 
 # Expose the port the app runs on
 EXPOSE 10000
 
-# Run the app
+# Define the command to run your app
 CMD [ "node", "server.js" ]
