@@ -12,7 +12,7 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
-// Use the port provided by the hosting service, or 5000 for local development
+// Use port 5000 for local development
 const PORT = process.env.PORT || 5000;
 
 // --- Middleware ---
@@ -22,20 +22,14 @@ app.use(express.json());
 // --- Socket.IO Setup ---
 const io = new Server(server, {
     cors: {
-        origin: "*",
+        origin: "*", // Allow all origins for local testing
         methods: ["GET", "POST"]
     }
 });
 
-// --- Config from Environment Variables ---
-const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// --- Fail-fast check for essential environment variables ---
-if (!MONGO_URI || !JWT_SECRET) {
-    console.error("FATAL ERROR: MONGO_URI and JWT_SECRET environment variables are required.");
-    process.exit(1);
-}
+// --- Config for Local Development ---
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://shreyaporwal167:shreya167@cluster0.8mljwgq.mongodb.net/price-monitor?retryWrites=true&w=majority&appName=Cluster0';
+const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key_that_is_long_and_random_123!';
 
 // --- MongoDB Connection ---
 mongoose.connect(MONGO_URI)
@@ -68,9 +62,8 @@ const Monitor = mongoose.model('Monitor', MonitorSchema);
 // --- Auth Middleware ---
 const auth = (req, res, next) => {
     const token = req.header('x-auth-token');
-    if (!token) {
-        return res.status(401).json({ msg: 'No token, authorization denied' });
-    }
+    if (!token) return res.status(401).json({ msg: 'No token, authorization denied' });
+    
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded.user;
@@ -90,14 +83,12 @@ io.on('connection', (socket) => {
             const decoded = jwt.verify(token, JWT_SECRET);
             if (decoded.user) {
                 userSockets.set(decoded.user.id, socket.id);
-                console.log(`User ${decoded.user.id} registered with socket ${socket.id}`);
             }
         } catch (err) {
             console.log('Invalid token for socket registration');
         }
     });
     socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
         for (let [userId, socketId] of userSockets.entries()) {
             if (socketId === socket.id) {
                 userSockets.delete(userId);
@@ -113,7 +104,7 @@ const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: 'shreyaporwal167@gmail.com',
-        pass: 'ztcwkurqrfrnziqq'
+        pass: 'ztcwkurqrfrnziqq' // Use an App Password from your Google Account
     }
 });
 
@@ -121,11 +112,8 @@ async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
     let browser = null;
     try {
-        // Simplified launch for Docker environment
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        // Simple launch for local development
+        browser = await puppeteer.launch({ headless: true });
 
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'networkidle2' });
@@ -133,10 +121,10 @@ async function scrapePrice(url) {
         if (priceElement) {
             const priceText = await page.evaluate(el => el.textContent, priceElement);
             const cleanedPrice = parseFloat(priceText.replace(/[₹$,]/g, ''));
-            console.log(`Successfully scraped price: ${cleanedPrice}`);
+            console.log(`Scraped price: ${cleanedPrice}`);
             return cleanedPrice;
         } else {
-            console.log(`Could not find price selector for URL: ${url}`);
+            console.log('Price element not found.');
             return null;
         }
     } catch (error) {
@@ -167,34 +155,29 @@ async function sendPriceAlert(monitor, newPrice) {
 
 cron.schedule('0 */4 * * *', async () => {
     console.log('Running scheduled price check for all users...');
-    try {
-        const monitors = await Monitor.find({});
-        for (const monitor of monitors) {
-            const newPrice = await scrapePrice(monitor.url);
-            if (newPrice !== null && newPrice !== monitor.currentPrice) {
-                monitor.currentPrice = newPrice;
-                monitor.priceHistory.push({ price: newPrice, date: new Date() });
-                monitor.lastChecked = new Date();
-                const updatedMonitor = await monitor.save();
+    const monitors = await Monitor.find({});
+    for (const monitor of monitors) {
+        const newPrice = await scrapePrice(monitor.url);
+        if (newPrice !== null && newPrice !== monitor.currentPrice) {
+            monitor.currentPrice = newPrice;
+            monitor.priceHistory.push({ price: newPrice, date: new Date() });
+            monitor.lastChecked = new Date();
+            const updatedMonitor = await monitor.save();
 
-                const userId = updatedMonitor.user.toString();
-                if (userSockets.has(userId)) {
-                    const socketId = userSockets.get(userId);
-                    io.to(socketId).emit('priceUpdate', updatedMonitor);
-                    console.log(`Emitted priceUpdate to user ${userId}`);
-                }
+            const userId = updatedMonitor.user.toString();
+            if (userSockets.has(userId)) {
+                const socketId = userSockets.get(userId);
+                io.to(socketId).emit('priceUpdate', updatedMonitor);
+                console.log(`Emitted priceUpdate to user ${userId}`);
+            }
 
-                if (newPrice <= monitor.targetPrice) {
-                    await sendPriceAlert(monitor, newPrice);
-                }
+            if (newPrice <= monitor.targetPrice) {
+                await sendPriceAlert(monitor, newPrice);
             }
         }
-    } catch (error) {
-        console.error("Error during scheduled job:", error);
     }
     console.log('Scheduled price check finished.');
 });
-
 
 // --- API Routes ---
 app.post('/api/auth/register', async (req, res) => {
@@ -209,17 +192,13 @@ app.post('/api/auth/register', async (req, res) => {
         user.password = await bcrypt.hash(password, salt);
         await user.save();
         const payload = { user: { id: user.id } };
-
         jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
-            if (err) {
-                console.error("JWT Sign Error:", err);
-                return res.status(500).json({ msg: 'Error signing token' });
-            }
+            if (err) throw err;
             res.json({ token });
         });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server error during registration' });
+        res.status(500).send('Server error');
     }
 });
 
@@ -235,17 +214,13 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(400).json({ msg: 'Invalid Credentials' });
         }
         const payload = { user: { id: user.id } };
-
         jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
-            if (err) {
-                console.error("JWT Sign Error:", err);
-                return res.status(500).json({ msg: 'Error signing token' });
-            }
+            if (err) throw err;
             res.json({ token });
         });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server error during login' });
+        res.status(500).send('Server error');
     }
 });
 
@@ -255,7 +230,7 @@ app.get('/api/monitors', auth, async (req, res) => {
         res.json(monitors);
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        res.status(500).send('Server Error');
     }
 });
 
@@ -264,7 +239,7 @@ app.post('/api/monitors', auth, async (req, res) => {
     try {
         const initialPrice = await scrapePrice(url);
         if (initialPrice === null) {
-            return res.status(400).json({ msg: 'Could not scrape initial price from the provided URL.' });
+            return res.status(400).json({ message: 'Could not scrape initial price.' });
         }
         const newMonitor = new Monitor({
             user: req.user.id,
@@ -281,7 +256,7 @@ app.post('/api/monitors', auth, async (req, res) => {
         res.json(monitor);
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        res.status(500).send('Server Error');
     }
 });
 
@@ -296,7 +271,7 @@ app.delete('/api/monitors/:id', auth, async (req, res) => {
         res.json({ msg: 'Monitor removed' });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        res.status(500).send('Server Error');
     }
 });
 
