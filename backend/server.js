@@ -6,38 +6,51 @@ const nodemailer = require('nodemailer');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const http = require('http');
+const { Server } = require("socket.io");
 
 const app = express();
+const server = http.createServer(app);
+
+// Use the port provided by the hosting service, or 5000 for local development
 const PORT = process.env.PORT || 5000;
 
 // --- Middleware ---
 app.use(cors());
 app.use(express.json());
 
-// --- Config ---
-// In a real app, use environment variables for these
-const MONGO_URI = 'mongodb+srv://shreyaporwal167:shreya167@cluster0.8mljwgq.mongodb.net/price-monitor?retryWrites=true&w=majority&appName=Cluster0';
-const JWT_SECRET = 'your_jwt_secret_key_12345'; // Replace with a long, random string for production
+// --- Socket.IO Setup ---
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow all origins
+        methods: ["GET", "POST"]
+    }
+});
+
+// --- Config from Environment Variables ---
+// These will be set in the Render dashboard, not in the code.
+// For local testing, you can temporarily hard-code them again.
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://shreyaporwal167:shreya167@cluster0.8mljwgq.mongodb.net/price-monitor?retryWrites=true&w=majority&appName=Cluster0';
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_12345';
+
 
 // --- MongoDB Connection ---
 mongoose.connect(MONGO_URI)
     .then(() => console.log('MongoDB Connected Successfully!'))
     .catch(err => console.error("MongoDB Connection ERROR:", err));
 
-// --- Mongoose Schemas ---
-
+// --- Mongoose Schemas & Models ---
 const UserSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     date: { type: Date, default: Date.now }
 });
-
 const User = mongoose.model('User', UserSchema);
 
 const MonitorSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     url: { type: String, required: true },
-    email: { type: String, required: true }, // Email for alerts
+    email: { type: String, required: true },
     targetPrice: { type: Number, required: true },
     currentPrice: { type: Number, default: 0 },
     priceHistory: [{
@@ -46,8 +59,8 @@ const MonitorSchema = new mongoose.Schema({
     }],
     lastChecked: { type: Date, default: Date.now }
 });
-
 const Monitor = mongoose.model('Monitor', MonitorSchema);
+
 
 // --- Auth Middleware ---
 const auth = (req, res, next) => {
@@ -65,8 +78,34 @@ const auth = (req, res, next) => {
 };
 
 
-// --- Nodemailer, Scraper, and Cron Job (No changes here) ---
+// --- Real-time Socket Logic ---
+const userSockets = new Map();
+io.on('connection', (socket) => {
+    console.log('A user connected:', socket.id);
+    socket.on('registerUser', (token) => {
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            if (decoded.user) {
+                userSockets.set(decoded.user.id, socket.id);
+                console.log(`User ${decoded.user.id} registered with socket ${socket.id}`);
+            }
+        } catch (err) {
+            console.log('Invalid token for socket registration');
+        }
+    });
+    socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id);
+        for (let [userId, socketId] of userSockets.entries()) {
+            if (socketId === socket.id) {
+                userSockets.delete(userId);
+                break;
+            }
+        }
+    });
+});
 
+
+// --- Nodemailer, Scraper, and Cron Job ---
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -78,16 +117,17 @@ const transporter = nodemailer.createTransport({
 async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
     try {
-        const browser = await puppeteer.launch({ headless: true });
+        // Added args for Render deployment compatibility
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'networkidle2' });
-
         const priceElement = await page.$('.a-price-whole');
-        
         if (priceElement) {
             const priceText = await page.evaluate(el => el.textContent, priceElement);
             const cleanedPrice = parseFloat(priceText.replace(/[₹$,]/g, ''));
-            
             await browser.close();
             console.log(`Successfully scraped price: ${cleanedPrice}`);
             return cleanedPrice;
@@ -108,14 +148,8 @@ async function sendPriceAlert(monitor, newPrice) {
         from: 'shreyaporwal167@gmail.com',
         to: monitor.email,
         subject: `Price Drop Alert for your product!`,
-        html: `
-            <p>Good news!</p>
-            <p>The price for the product you are monitoring has dropped to <strong>₹${newPrice.toLocaleString('en-IN')}</strong>.</p>
-            <p>Your target price was ₹${monitor.targetPrice.toLocaleString('en-IN')}.</p>
-            <p>Check it out here: <a href="${monitor.url}">Product Link</a></p>
-        `
+        html: `<p>Good news! The price for your monitored product has dropped to <strong>₹${newPrice.toLocaleString('en-IN')}</strong>.</p><p>Check it out here: <a href="${monitor.url}">Product Link</a></p>`
     };
-
     try {
         await transporter.sendMail(mailOptions);
         console.log(`Price alert email sent successfully to ${monitor.email}`);
@@ -129,13 +163,18 @@ cron.schedule('0 */4 * * *', async () => {
     const monitors = await Monitor.find({});
     for (const monitor of monitors) {
         const newPrice = await scrapePrice(monitor.url);
-        if (newPrice !== null) {
+        if (newPrice !== null && newPrice !== monitor.currentPrice) {
             monitor.currentPrice = newPrice;
-            monitor.priceHistory.push({ price: newPrice });
-            monitor.lastChecked = Date.now();
-            await monitor.save();
+            monitor.priceHistory.push({ price: newPrice, date: new Date() });
+            monitor.lastChecked = new Date();
+            const updatedMonitor = await monitor.save();
 
-            console.log(`Checked ${monitor.url}. New price: ${newPrice}`);
+            const userId = updatedMonitor.user.toString();
+            if (userSockets.has(userId)) {
+                const socketId = userSockets.get(userId);
+                io.to(socketId).emit('priceUpdate', updatedMonitor);
+                console.log(`Emitted priceUpdate to user ${userId}`);
+            }
 
             if (newPrice <= monitor.targetPrice) {
                 await sendPriceAlert(monitor, newPrice);
@@ -147,8 +186,6 @@ cron.schedule('0 */4 * * *', async () => {
 
 
 // --- API Routes ---
-
-// ++ Auth Routes ++
 app.post('/api/auth/register', async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -157,11 +194,9 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ msg: 'User already exists' });
         }
         user = new User({ email, password });
-
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(password, salt);
         await user.save();
-
         const payload = { user: { id: user.id } };
         jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
             if (err) throw err;
@@ -195,10 +230,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-
-// ++ Monitor Routes (Now Protected) ++
-
-// GET all monitored items for the logged-in user
 app.get('/api/monitors', auth, async (req, res) => {
     try {
         const monitors = await Monitor.find({ user: req.user.id }).sort({ date: -1 });
@@ -209,7 +240,6 @@ app.get('/api/monitors', auth, async (req, res) => {
     }
 });
 
-// POST a new item to monitor
 app.post('/api/monitors', auth, async (req, res) => {
     const { url, email, targetPrice } = req.body;
     try {
@@ -236,17 +266,13 @@ app.post('/api/monitors', auth, async (req, res) => {
     }
 });
 
-// DELETE a monitored item
 app.delete('/api/monitors/:id', auth, async (req, res) => {
     try {
         let monitor = await Monitor.findById(req.params.id);
         if (!monitor) return res.status(404).json({ msg: 'Monitor not found' });
-        
-        // Make sure user owns the monitor
         if (monitor.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'Not authorized' });
         }
-
         await Monitor.findByIdAndDelete(req.params.id);
         res.json({ msg: 'Monitor removed' });
     } catch (err) {
@@ -255,6 +281,5 @@ app.delete('/api/monitors/:id', auth, async (req, res) => {
     }
 });
 
-
 // --- Start Server ---
-app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));

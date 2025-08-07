@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import io from 'socket.io-client';
 
 // --- Helper Components & Icons ---
-
 const ChartIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -16,9 +16,12 @@ const AuthIcon = () => (
     </svg>
 );
 
-
 // --- API Configuration ---
-const API_URL = 'http://localhost:5000/api';
+// IMPORTANT: Replace with your actual Render URL once deployed
+const RENDER_BACKEND_URL = 'https://your-backend-name.onrender.com'; 
+
+const API_URL = `${RENDER_BACKEND_URL}/api`;
+const SOCKET_URL = RENDER_BACKEND_URL;
 
 // --- Set Auth Token for Axios ---
 const setAuthToken = token => {
@@ -52,11 +55,7 @@ const App = () => {
     };
 
     if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-lg font-semibold text-gray-500">Loading Application...</div>
-            </div>
-        );
+        return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="text-lg font-semibold text-gray-500">Loading Application...</div></div>;
     }
 
     return (
@@ -77,7 +76,6 @@ const AuthPage = ({ setToken, setIsAuthenticated }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -102,12 +100,9 @@ const AuthPage = ({ setToken, setIsAuthenticated }) => {
         <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
             <div className="max-w-md w-full">
                 <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200">
-                    <div className="flex justify-center">
-                        <AuthIcon />
-                    </div>
+                    <div className="flex justify-center"><AuthIcon /></div>
                     <h2 className="text-3xl font-bold text-center text-gray-800 mb-2">{isLogin ? 'Welcome Back!' : 'Create Account'}</h2>
                     <p className="text-center text-gray-500 mb-8">{isLogin ? 'Sign in to continue' : 'Get started with your free account'}</p>
-                    
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Email Address</label>
@@ -132,7 +127,6 @@ const AuthPage = ({ setToken, setIsAuthenticated }) => {
         </div>
     );
 };
-
 
 // --- Dashboard Page Component ---
 const DashboardPage = ({ logout }) => {
@@ -159,6 +153,26 @@ const DashboardPage = ({ logout }) => {
     useEffect(() => {
         fetchMonitors();
     }, [fetchMonitors]);
+
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const socket = io(SOCKET_URL);
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server!');
+            socket.emit('registerUser', token);
+        });
+        socket.on('priceUpdate', (updatedMonitor) => {
+            console.log('Received price update:', updatedMonitor);
+            setMonitors(prevMonitors =>
+                prevMonitors.map(m => m._id === updatedMonitor._id ? updatedMonitor : m)
+            );
+        });
+        return () => {
+            console.log('Disconnecting WebSocket.');
+            socket.disconnect();
+        };
+    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -195,7 +209,6 @@ const DashboardPage = ({ logout }) => {
                 </div>
                 <button onClick={logout} className="bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600 transition-all transform hover:scale-105">Logout</button>
             </header>
-            
             <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1">
                     <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
@@ -220,7 +233,6 @@ const DashboardPage = ({ logout }) => {
                         </form>
                     </div>
                 </div>
-
                 <div className="lg:col-span-2 space-y-6">
                     {monitors.length > 0 ? monitors.map(monitor => (
                         <MonitorCard key={monitor._id} monitor={monitor} onDelete={handleDelete} />
@@ -256,7 +268,6 @@ const MonitorCard = ({ monitor, onDelete }) => {
                     </svg>
                 </button>
             </div>
-            
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center border-t border-b border-gray-100 py-4">
                 <div>
                     <p className="text-sm font-medium text-gray-500">Current Price</p>
@@ -271,9 +282,8 @@ const MonitorCard = ({ monitor, onDelete }) => {
                     <p className="text-md text-gray-600 mt-2">{new Date(monitor.lastChecked).toLocaleString()}</p>
                 </div>
             </div>
-
             <div className="mt-4 h-64">
-                 <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={formattedHistory} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                         <XAxis dataKey="date" stroke="#9ca3af" />
@@ -288,7 +298,7 @@ const MonitorCard = ({ monitor, onDelete }) => {
                             formatter={(value) => `₹${value.toLocaleString('en-IN')}`}
                         />
                         <Legend />
-                        <Line type="monotone" dataKey="price" stroke="#4f46e5" strokeWidth={2} activeDot={{ r: 8 }} dot={{r: 4}} />
+                        <Line type="monotone" dataKey="price" stroke="#4f46e5" strokeWidth={2} activeDot={{ r: 8 }} dot={{ r: 4 }} />
                     </LineChart>
                 </ResponsiveContainer>
             </div>
