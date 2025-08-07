@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core'); // Changed from 'puppeteer'
+const chromium = require('chrome-aws-lambda'); // Added for server compatibility
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
@@ -29,9 +30,8 @@ const io = new Server(server, {
 
 // --- Config from Environment Variables ---
 // These will be set in the Render dashboard, not in the code.
-// For local testing, you can temporarily hard-code them again.
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://shreyaporwal167:shreya167@cluster0.8mljwgq.mongodb.net/price-monitor?retryWrites=true&w=majority&appName=Cluster0';
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_12345';
+const MONGO_URI = process.env.MONGO_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 
 // --- MongoDB Connection ---
@@ -109,36 +109,44 @@ io.on('connection', (socket) => {
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'shreyaporwal167@gmail.com',
-        pass: 'ztcwkurqrfrnziqq'
+        user: 'shreyaporwal167@gmail.com', // Best to use environment variables for these, too!
+        pass: 'ztcwkurqrfrnziqq' // This is an app password, which is correct.
     }
 });
 
 async function scrapePrice(url) {
     console.log(`Scraping URL: ${url}`);
+    let browser = null;
     try {
-        // Added args for Render deployment compatibility
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        // --- THIS IS THE KEY CHANGE FOR RENDER DEPLOYMENT ---
+        browser = await puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath,
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
         });
+        // --- END OF KEY CHANGE ---
+
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'networkidle2' });
         const priceElement = await page.$('.a-price-whole');
         if (priceElement) {
             const priceText = await page.evaluate(el => el.textContent, priceElement);
             const cleanedPrice = parseFloat(priceText.replace(/[₹$,]/g, ''));
-            await browser.close();
             console.log(`Successfully scraped price: ${cleanedPrice}`);
             return cleanedPrice;
         } else {
             console.log(`Could not find price selector for URL: ${url}`);
-            await browser.close();
             return null;
         }
     } catch (error) {
         console.error(`Error scraping ${url}:`, error);
         return null;
+    } finally {
+        if (browser !== null) {
+            await browser.close();
+        }
     }
 }
 
