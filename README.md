@@ -1,6 +1,6 @@
 # PriceAlert: A Full-Stack Price Monitoring App
 
-PriceAlert is a full-stack web application that allows users to monitor the prices of products from e-commerce websites. Users can register, submit product URLs, and set a target price. The backend server periodically scrapes the product pages and notifies the user via email and real-time dashboard updates when the price drops below their target.
+PriceAlert is a full-stack web application that allows users to monitor the prices of products from E-commerce websites. Users can register, submit product URLs, and set a target price. The backend server periodically scrapes the product pages and notifies the user via email and real-time dashboard updates when the price drops below their target.
 
 ***
 
